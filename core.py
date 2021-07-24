@@ -1,7 +1,8 @@
 
-logins = {'ice':{'api_id':'7716876', 
+logins = {
+   'ice':{'api_id':'7716876', 
   'api_hash':'ee135e0c2a859ca10ceca6e2fa3b30d0', 
-  'phone':'+962775543016'}, 
+  'phone':'+962775543016'},
  'ice2':{'api_id':'7558044', 
   'api_hash':'21fe488cdebf3aeb9098b87e8424a829', 
   'phone':'+46761529331'}, 
@@ -28,7 +29,11 @@ logins = {'ice':{'api_id':'7716876',
   'phone':'+2348162467444'}, 
  'sixtus':{'api_id':'7824769', 
   'api_hash':'fa4ffcae808ac2b1f2ff8955dbae01e8', 
-  'phone':'+2348052983271'}}
+  'phone':'+2348052983271'},
+  
+  }
+
+
 csv_list = [
  'Binance_p2p_nigeria.csv', 'btt.csv', 'daily_crown_9ja.csv', 'ftx_africa.csv',
  'safe_mars.csv', 'members.csv']

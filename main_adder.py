@@ -14,68 +14,73 @@ def reset_offset_file() :
     #we can choose to delete
     pass
 
-
-def get_users(input_csv,offset_file = None,reset_offset = False,group_title = None) :
+def get_offset_data(offset_file = None,group_title = None) :
+    skip_offset  = False
+    group_not_found = False
     """ offset file is a json file containing the last indexes of the last read"""
     """ consider offset tells if we should clear the offset file
-    group title is used to obtain last offset for a particular group"""
-    
-    if not reset_offset :
-        try :
-            with open(offset_file,'r') as jf :
-                data = json.load(jf)
-                #dictionary of csv filenames and last offsets
-                offset_dicts = {}
-                for file_name,line_index in data['group_title'] :
+    group title is used to obtain last offset for a particular group
+    skip offset used for checking if csv read will take note of offset
+    returns (skip_offset,group_not_found,offset_data)
+    """
+    try :
+        with open(offset_file,'r') as jf :
+
+            data = json.load(jf)
+            #dictionary of csv filenames and last offsets
+            offset_dicts = {}
+            item = data.get('group_title',None)
+            if item :
+                for file_name,line_index in item.items() :
                     offset_dicts[file_name]  = line_index
-        except FileNotFoundError :
-            print("offset file does not exist.")
-            print()
-            print("negelecting,setting reset_offset to True")
-            reset_offset = True
-    else :
-        #we now reset offset files 
-        reset_offset_file()
+                return (skip_offset,group_not_found,offset_dicts)
+
+            else :
+                print("{} not was not found in the offset file")
+                print()
+                print("assuming its the first adding to {}".format(group_title))
+                skip_offset  = True
+                group_not_found = True
+                return (skip_offset,group_not_found,None)
+
+    except FileNotFoundError :
+        print("offset file does not exist.")
+        print()
+        print("assuming its the first adding to {}".format(group_title))
+        print()
+        skip_offset  = True
+        return (skip_offset,group_not_found,None)
 
 
+
+def get_users(input_csv,add_no) :
+    if not add_no > 100 and not add_no <= 1000 :    
+        print("only maximum of 1000 can go ata time")
+        exit()
+    no_users =  add_no//100
+    added_users = 0
     users  = []
     users_list = []
+    offset = add_no - (no_users * 100)
+    if offset > 0 : no_users += 1
     #to update offset file
     new_offset_file_content = {}
     new_offset_list = []
     for _csv in input_csv :
+        if added_users == no_users : break
         new_offset_data = {}
         with open(_csv, encoding='UTF-8') as f  :
             rows = csv.reader(f, delimiter=",", lineterminator="\n")
             next(rows, None)
-            line_index = 0 #indexing the line read to save to offset incase
             for row in rows:
                 user = {}
                 user['username'] = row[0]
                 user['id'] = int(row[1])
                 user['access_hash'] = int(row[2])
                 user['name'] = row[3]
-                #consider from offset if it is allowed
-                if not reset_offset :
-                    #append users only from row greater than offset
-                    if line_index > int(offset_dicts[_csv]) :
-                        users.append(user)
-                    else :
-                        continue    
-                else :
-                    users.append(user)        
-                line_index += 1
+                users.append(user)              
 
         users_list.append(users)
-        new_offset_data[_csv] = line_index
-       
-        #append new file data
-        new_offset_list.append(new_offset_data)
-    #update only the group title for the 
-    data[group_title] = new_offset_list
-    #update offset file to new csv line index
-    with open(offset_file,'w') as jf :
-        jf.write(json.dump(data))
     return users_list        
 
 
@@ -102,7 +107,7 @@ def get_clients(add_no) :
         added_clients  = 0
         clients = []
         offset = add_no - (no_client * 100)
-        if offset < 0 : no_client += 1
+        if offset > 0 : no_client += 1
         for _user in logins.keys() :
             auth_user = logins[_user]
             api_id = auth_user['api_id']
@@ -116,15 +121,16 @@ def get_clients(add_no) :
             added_clients += 1   
         return (clients,"multiple")    
 
-
-def add_users(client,users,group = None) :
-    #print("Adding members for ")
-    current_add = 0
+def get_group(client) :
+    """ uses one client instance to get group title used for whole exercise"""
+    print("connecting...")
     client.connect()
     if not client.is_user_authorized():
+        print("not authenticated,sending code....")
         client.send_code_request(client.auth_phone)
+        
         client.sign_in(client.auth_phone, input('Enter the code: '))
-
+        print("signinin...")
     chats = []
     last_date = None
     chunk_size = 200
@@ -141,64 +147,114 @@ def add_users(client,users,group = None) :
 
     for chat in chats:
         try:
-            if chat.megagroup == True:
+            #remember to add if chat.megagroup == True
+            if  chat.megagroup == True :
                 groups.append(chat)
         except:
             continue  
     #allow group selection done once
-    if not group :     
-        print('Choose a group to add members:')
-        i = 0
-        for group in groups:
-            print(str(i) + '- ' + group.title)
-            i += 1
+    print('Choose a group to add members:')
+    i = 0
+    for group in groups:
+        print(str(i) + '- ' + group.title)
+        i += 1
 
-        g_index = input("Enter a Number: ")
-        target_group = groups[int(g_index)]
+    g_index = input("Enter a Number: ")
+    target_group = groups[int(g_index)]
     
-    else : target_group = group
+    return target_group
+
+
+def add_users(client,users,target_group,csv_list,skip_offset,grp_not_found,data_list) :
+    global active_client
+    print("Adding members for {} by client {}".format(target_group.title,active_client))
+    current_add = 0
     
-    
+    new_data_list = []  #list of offset data for a group
+    json_data = []   #json data
+    line_index = 0 #initiaize line count
     target_group_entity = InputPeerChannel(target_group.id, target_group.access_hash)
-    mode = int(1)      
-    
+    mode = int(1)  
+    add_limit = 0 #add limit
     for user in users:
+        if add_limit == 100 :
+            print("reached 100 safe limit for cient {}".format(active_client))
+            break
         try:
             print("Adding {}".format(user['id']))
             if mode == 1:
                 if user['username'] == "":
                     continue
                 user_to_add = client.get_input_entity(user['username'])
-
-            client(InviteToChannelRequest(target_group_entity, [user_to_add]))
+                
+                #consider from offset if it is allowed
+                if not skip_offset  :
+                    #append users only from row greater than offset
+                    #obtained csv file name from csv_list using index
+                    _csv = csv_list[active_client - 1] 
+                    #print(csv_file_index)
+                    if line_index > int(offset_dicts[_csv]) :
+                        client(InviteToChannelRequest(target_group_entity, [user_to_add]))
+                    else :
+                        continue    
+                else :
+                    
+                    _csv = csv_list[active_client - 1] 
+                    client(InviteToChannelRequest(target_group_entity, [user_to_add]))
+                    if grp_not_found :
+                        #then we just replace only for the group
+                        data_list[_csv] = line_index
+                        
+                    else :
+                        #then we assume  case for missing file
+                        new_offset_data = {}  #offset data for a file
+                        new_offset_data[_csv] = line_index
+                        new_data_list.append(new_offset_data)
+                        
+            
             #time.sleep(1)
+            global Users_Added 
+            global add_no
             Users_Added += 1
             current_add += 1
-            
+            line_index += 1
             if Users_Added == add_no : 
                 print("Added {} members,exiting ..".format(Users_Added))
                 break
         except PeerFloodError:
             print("Getting Flood Error from telegram. Script is stopping now. Please try again after some time.")
-            #time.sleep(10)
+            time.sleep(10)
+            continue
         except UserPrivacyRestrictedError:
             print("The user's privacy settings do not allow you to do this. Skipping.")
             #time.sleep(5)
+            #input()
+            continue
         except:
             traceback.print_exc()
             print("Unexpected Error")
             #time.sleep(5)
+            #input()
             continue
-    print("Added {} members".format(current_add))
-    return target_group
+ 
+    print("Added {} members in this iteration,total {}".format(current_add,Users_Added))
+    if offset_data : 
+        json_data[target_group.title] = data_list
+    json_data[target_group.title] = new_data_list
+    #update offset file to new csv line indexes
+    with open(offset_file,'w') as jf :
+        json.dump(json_data,jf)
+    return 
 
 
 
 
 
 def main() :
+    global Users_Added
     Users_Added = 0
     link = 't.me/joinchat/RyHbZrUzf-1YMMtE'
+    global add_no
     add_no = input("How many users do you want to add  : ")
     add_no = int(add_no)
     clients,nature = get_clients(add_no)
@@ -207,24 +263,23 @@ def main() :
         pass
 
     elif nature == "multiple" :
-        group = None
-        for client,users in zip(clients,get_users(csv_list,offset_file='offset_file.json')) :
-            if not group :
-                group = add_users(client, users)
-            else : 
-                add_users(client, users, group)    
-    
-
-
-
-
-
-
-
-
-
-
-
+        #uses one instance of client to get group
+        group = get_group(clients[0])
+        #reset_offset = input("Do you want to rese")
+        users_list   =  get_users(csv_list,add_no)
+        global active_client
+        active_client = 0
+        skip_offset,grp_not_found,data_list = get_offset_data(offset_file='offset_file.json',group_title=group.title)
+        for client,users in zip(clients,users_list) :
+            active_client += 1
+            add_users(client,
+             users,
+              group,
+              csv_list,
+              skip_offset,
+              grp_not_found,
+              data_list)    
+            input()
 
 
 
